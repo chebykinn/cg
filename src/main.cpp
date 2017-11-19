@@ -6,9 +6,9 @@
 using namespace game;
 
 int main(int argc, char *argv[]){
-	auto _logger = spdlog::stdout_color_mt(Config::logger_name());
-	spdlog::set_level(spdlog::level::trace);
-	Game game;
+    auto _logger = spdlog::stdout_color_mt(Config::logger_name());
+    spdlog::set_level(spdlog::level::trace);
+    Game game;
 
-	return game.start();
+    return game.start();
 }

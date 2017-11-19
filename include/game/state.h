@@ -10,11 +10,11 @@
 namespace game {
 class State {
 private:
-	static std::shared_ptr<Window> _main_window;
+    static std::shared_ptr<Window> _main_window;
 public:
-	static const auto &main_window() { return _main_window; }
-	static void main_window(const std::shared_ptr<Window> &window) {
-		_main_window = window;
-	}
+    static const auto &main_window() { return _main_window; }
+    static void main_window(const std::shared_ptr<Window> &window) {
+        _main_window = window;
+    }
 };
 }

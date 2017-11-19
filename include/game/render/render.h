@@ -6,8 +6,8 @@ namespace game {
 namespace render {
 class Render {
 public:
-	virtual ~Render() = default;
-	virtual void render(Viewport &view) = 0;
+    virtual ~Render() = default;
+    virtual void render(Viewport &view) = 0;
 };
 }
 }

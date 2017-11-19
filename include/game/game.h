@@ -10,14 +10,14 @@
 namespace game {
 class Game {
 private:
-	std::shared_ptr<spdlog::logger> _logger;
-	std::unique_ptr<render::Window> _window;
-	std::unique_ptr<render::Viewport> _view;
-	int32_t init();
-	void main_loop();
+    std::shared_ptr<spdlog::logger> _logger;
+    std::unique_ptr<render::Window> _window;
+    std::unique_ptr<render::Viewport> _view;
+    int32_t init();
+    void main_loop();
 public:
-	Game();
-	~Game();
-	int32_t start();
+    Game();
+    ~Game();
+    int32_t start();
 };
 }

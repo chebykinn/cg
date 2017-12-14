@@ -10,9 +10,11 @@ private:
     static std::string _window_title;
     static std::string _data_path;
     static std::string _shader_path;
+    static std::string _map_name;
     static size_t _window_width;
     static size_t _window_height;
 public:
+    static bool load(const std::string &filename);
     static const auto &data_path() { return _data_path; };
     static void data_path(const std::string &val) { _data_path = val; };
 
@@ -33,5 +35,8 @@ public:
 
     static const auto &window_height() { return _window_height; };
     static void window_height(const size_t val) { _window_height = val; };
+
+    static const auto &map_name() { return _map_name; };
+    static void map_name(const std::string &val) { _map_name = val; };
 };
 }

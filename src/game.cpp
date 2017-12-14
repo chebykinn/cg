@@ -70,10 +70,11 @@ void Game::main_loop() {
 
     _view->camera(camera);
 
-    _view->camera()->position({0, 0, 5});
+    _view->camera()->position({230.087,91.6821,-84.9806});
 
-    float speed = 0.05f; // 3 units / second
-    float mouse_speed = 0.0005f;
+    float speed = 320.0f;
+    float jump_accel = 5.0f;
+    float mouse_speed = 0.5f;
     // Get mouse position
     float xpos = 0.0f, ypos = 0.0f;
     SDL_SetRelativeMouseMode(SDL_TRUE);
@@ -81,10 +82,15 @@ void Game::main_loop() {
     Transform t({0,0,0});
     Entity e;
     e.transform(t);
-    e.renderer(std::unique_ptr<BspRender>(new BspRender()));
+    e.renderer(std::unique_ptr<BspRender>(new BspRender(Config::map_name())));
 
-    //SDL_SetWindowGrab(_window->window(), SDL_TRUE);
-    //SDL_ShowCursor(0);
+
+    BspRender *r = dynamic_cast<decltype(r)>(e.renderer().get());
+    assert(r != nullptr);
+    bool noclip = true;
+
+    glm::vec3 velocity = {0,0,0};
+
 
     while(is_running) {
         while(SDL_PollEvent(&event)) {
@@ -105,7 +111,8 @@ void Game::main_loop() {
 
         float mx = xpos * mouse_speed;
         float my = ypos * mouse_speed;
-        _view->camera()->update(mx, my);
+
+        auto old_pos = _view->camera()->position();
 
         if(Action::action("game.quit").is(Action::State::Active)){
             is_running = false;
@@ -123,9 +130,36 @@ void Game::main_loop() {
         if(Action::action("movement.left").is(Action::State::Active)){
             _view->camera()->strafe(-speed);
         }
-
-
+        if(Action::action("movement.jump").is(Action::State::Active)){
+            if(r->is_on_ground()) {
+                velocity.y += jump_accel;
+            }
+        }
+        if(Action::action("debug.noclip").is(Action::State::Activated)){
+            noclip = !noclip;
+            Action::action("debug.noclip").state(Action::State::None);
+        }
         _view->start_render();
+
+        if(!noclip) {
+
+            auto new_pos = _view->camera()->position();
+            new_pos.y = old_pos.y;
+            _view->camera()->position(new_pos);
+
+            velocity = _view->camera()->velocity(velocity);
+            new_pos = _view->camera()->position();
+
+            auto n_pos = r->trace_box(old_pos, new_pos);
+            _view->camera()->position(n_pos);
+            if(r->is_on_ground()){
+                if(velocity.y < 0) {
+                    velocity.y = 0;
+                }
+            }
+        }
+        _view->camera()->update(mx, my, _view->frame_interval());
+
 
         e.renderer()->render(*_view);
         _view->end_render();

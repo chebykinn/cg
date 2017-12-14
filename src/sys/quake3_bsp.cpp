@@ -1,53 +1,41 @@
+#include <SDL2/SDL_image.h>
 #include <iostream>
-
+#include <fstream>
 #include <cstring>
 #include <cstdlib>
 #include <cmath>
 #include <cstdio>
 
-#include <GL/glew.h>
+#include <thread>
+#include <chrono>
+
 #include <GL/gl.h>
 #include <GL/glu.h>
-//#include "Main.h"
-//#include "Camera.h"
-#include <game/sys/quake3_bsp.h>
-//#include "Frustum.h"
-#include <glm/glm.hpp>
-#define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtc/matrix_transform.hpp>
-#include <glm/gtx/transform.hpp>
 
+#include <game/sys/quake3_bsp.h>
+#include <game/config.h>
 #define MAX_PATH 255
 
-static bool CreateTexture(uint32_t &texture, const char *strFileName) {
-/*
-    if(!strFileName)
+#define BEZIER_LEVEL 3
+
+using namespace game;
+
+using namespace std::chrono_literals;
+
+Quake3Bsp::Quake3Bsp() {
+    _logger = spdlog::stdout_color_mt("bsp");
+}
+
+bool Quake3Bsp::create_texture(uint32_t &texture, const std::string &filename) {
+    _logger->info("Loading texture: {}", filename);
+    std::unique_ptr<SDL_Surface, decltype(&SDL_FreeSurface)> img =
+        decltype(img)(IMG_Load((Config::data_path() + filename).c_str()),
+                      SDL_FreeSurface);
+    if(!img) {
+        _logger->error("Failed to load image, SDL_error: {}", IMG_GetError());
         return false;
-
-    // Define a pointer to a tImage
-    tImage *pImage = NULL;
-
-    // If the file is a jpeg, load the jpeg and store the data in pImage
-    if(strstr(strFileName, ".jpg")) {
-        pImage = LoadJPG(strFileName);
     }
-    // If the file is a tga, load the tga and store the data in pImage
-    else if(strstr(strFileName, ".tga")) {
-        pImage = LoadTGA(strFileName);
-    }
-    // If the file is a bitmap, load the bitmap and store the data in pImage
-    else if(strstr(strFileName, ".bmp")) {
-        pImage = LoadBMP(strFileName);
-    }
-    // Else we don't support the file format that is trying to be loaded
-    else
-        return false;
-
-    // Make sure valid image data was given to pImage, otherwise return false
-    if(pImage == NULL)
-        return false;
-
-    // Generate a texture with the associative texture ID stored in the array
+    // Generate a texture with the associative texture _id stored in the array
     glGenTextures(1, &texture);
 
     // This sets the alignment requirements for the start of each pixel row in memory.
@@ -56,90 +44,37 @@ static bool CreateTexture(uint32_t &texture, const char *strFileName) {
     // Bind the texture to the texture arrays index and init the texture
     glBindTexture(GL_TEXTURE_2D, texture);
 
-    // Assume that the texture is a 24 bit RGB texture (We convert 16-bit ones to 24-bit)
-    int textureType = GL_RGB;
-
-    // If the image is 32-bit (4 channels), then we need to specify GL_RGBA for an alpha
-    if(pImage->channels == 4)
-        textureType = GL_RGBA;
+    int texture_type = GL_RGB;
+    if(img->format->BytesPerPixel == 4) texture_type = GL_RGBA;
 
     // Build Mipmaps (builds different versions of the picture for distances - looks better)
-    gluBuild2DMipmaps(GL_TEXTURE_2D, pImage->channels, pImage->sizeX,
-                      pImage->sizeY, textureType, GL_UNSIGNED_BYTE, pImage->data);
+    gluBuild2DMipmaps(GL_TEXTURE_2D, img->format->BytesPerPixel, img->w,
+                      img->h, texture_type, GL_UNSIGNED_BYTE, img->pixels);
 
     //Assign the mip map levels and texture info
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-    // Now we need to free the image data that we loaded since openGL stored it as a texture
-
-    if (pImage)    {                                // If we loaded the image
-
-        if (pImage->data) { // If there is texture data
-            free(pImage->data);                        // Free the texture data, we don't need it anymore
-        }
-
-        free(pImage);                                // Free the image structure
-    }
-
-*/
-    // Return a success
     return true;
 }
 
 
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-//
-// Surprisingly enough, there isn't that much code to add in this file to allow
-// us to walk up stairs/slopes.  We add one function, and then a few lines here
-// and there.  To make jumping more realistic, we only want to allow the user to
-// jump when they are on the ground.  We add a few lines of code to check for this.
-//
-//
-
 // This is our maximum height that the user can climb over
-const float kMaxStepHeight = 10.0f;
-
-// We use the camera in our TryToStep() function so we extern the global camera
-//extern CCamera g_Camera;
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
-// This is our global frustum class, which is used to cull BSP leafs
-//extern CFrustum g_Frustum;
+const float MAX_STEP_HEIGHT = 10.0f;
 
 // This will store how many faces are drawn and are seen by the camera
-int g_VisibleFaces = 0;
+static int g_VisibleFaces = 0;
 
 // This tells us if we want to render the lightmaps
-bool g_bLightmaps = true;
+static bool g_bLightmaps = true;
 
 // This holds the gamma value that was stored in the config file
-float g_Gamma = 10;
+static float g_Gamma = 3;
 
 // This tells us if we want to render the textures
-bool g_bTextures = true;
+static bool g_bTextures = true;
 
-
-//////////////////////////// CQUAKE3BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This is our object's constructor to initial all it's data members
-/////
-//////////////////////////// CQUAKE3BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CQuake3BSP::CQuake3BSP() {
-}
-
-
-//////////////////////////// CHANGE GAMMA \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This manually changes the gamma of an image
-/////
-//////////////////////////// CHANGE GAMMA \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::ChangeGamma(uint8_t *pImage, int size, float factor) {
+void Quake3Bsp::change_gamma(uint8_t *pImage, int size, float factor) {
     // Go through every pixel in the lightmap
     for(int i = 0; i < size / 3; i++, pImage += 3) {
         float scale = 1.0f, temp = 0.0f;
@@ -162,7 +97,7 @@ void CQuake3BSP::ChangeGamma(uint8_t *pImage, int size, float factor) {
 
         // Get the scale for this pixel and multiply it by our pixel values
         scale*=255.0f;
-        r*=scale;    g*=scale;    b*=scale;
+        r*=scale;   g*=scale;   b*=scale;
 
         // Assign the new gamma'nized RGB values to our image
         pImage[0] = (uint8_t)r;
@@ -172,14 +107,8 @@ void CQuake3BSP::ChangeGamma(uint8_t *pImage, int size, float factor) {
 }
 
 
-////////////////////////////// CREATE LIGHTMAP TEXTURE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This creates a texture map from the light map image bits
-/////
-////////////////////////////// CREATE LIGHTMAP TEXTURE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::CreateLightmapTexture(uint32_t &texture, uint8_t *pImageBits, int width, int height) {
-    // Generate a texture with the associative texture ID stored in the array
+void Quake3Bsp::create_lightmap_texture(uint32_t &texture, uint8_t *pImageBits, int width, int height) {
+    // Generate a texture with the associative texture _id stored in the array
     glGenTextures(1, &texture);
 
     // This sets the alignment requirements for the start of each pixel row in memory.
@@ -189,7 +118,7 @@ void CQuake3BSP::CreateLightmapTexture(uint32_t &texture, uint8_t *pImageBits, i
     glBindTexture(GL_TEXTURE_2D, texture);
 
     // Change the lightmap gamma values by our desired gamma
-    ChangeGamma(pImageBits, width*height*3, g_Gamma);
+    change_gamma(pImageBits, width*height*3, g_Gamma);
 
     // Build Mipmaps (builds different versions of the picture for distances - looks better)
     gluBuild2DMipmaps(GL_TEXTURE_2D, 3, width, height, GL_RGB, GL_UNSIGNED_BYTE, pImageBits);
@@ -200,269 +129,283 @@ void CQuake3BSP::CreateLightmapTexture(uint32_t &texture, uint8_t *pImageBits, i
     glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 }
 
+static bool file_exists(const std::string& str) {
+   std::ifstream fs(str);
+   return fs.is_open();
+}
 
-//////////////////////////// FIND TEXTURE EXTENSION \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This attaches the image extension to the texture name, if found
-/////
-//////////////////////////// FIND TEXTURE EXTENSION \\\\\\\\\\\\\\\\\\\\\\\\\\\*
+void Quake3Bsp::find_texture(char *filename) {
+    std::string jpg_path = filename + std::string(".jpg");
+    std::string tga_path = filename + std::string(".tga");
 
-void CQuake3BSP::FindTextureExtension(char *strFileName) {
-    char strTGAPath[MAX_PATH] = {0};
-    char strJPGPath[MAX_PATH] = {0};
-    FILE *fp = NULL;
-
-    // Get the current path we are in
-    strcpy(strJPGPath, getenv("PWD"));
-
-
-    // Add on a '\' and the file name to the end of the current path.
-    // We create 2 seperate strings to test each image extension.
-    strcat(strJPGPath, "/");
-    strcat(strJPGPath, strFileName);
-    strcpy(strTGAPath, strJPGPath);
-
-    // Add the extensions on to the file name and path
-    strcat(strJPGPath, ".jpg");
-    strcat(strTGAPath, ".tga");
-
-    // Check if there is a jpeg file with the texture name
-    if((fp = fopen(strJPGPath, "rb")) != NULL) {
-        // If so, then let's add ".jpg" onto the file name and return
-        strcat(strFileName, ".jpg");
+    if(file_exists(Config::data_path() + jpg_path)) {
+        std::copy(jpg_path.begin(), jpg_path.end(), filename);
         return;
     }
 
-    // Check if there is a targa file with the texture name
-    if((fp = fopen(strTGAPath, "rb")) != NULL) {
-        // If so, then let's add a ".tga" onto the file name and return
-        strcat(strFileName, ".tga");
+    if(file_exists(Config::data_path() + tga_path)) {
+        std::copy(tga_path.begin(), tga_path.end(), filename);
         return;
     }
 }
 
+BSPVertex operator+(const BSPVertex& v1, const BSPVertex& v2) {
+    BSPVertex temp;
+    temp.position = v1.position + v2.position;
+    temp.texture_coord = v1.texture_coord + v2.texture_coord;
+    temp.lightmap_coord = v1.lightmap_coord + v2.lightmap_coord;
+    temp.normal = v1.normal + v2.normal;
+    return temp;
+}
 
-//////////////////////////// LOAD BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This loads in all of the .bsp data for the level
-/////
-//////////////////////////// LOAD BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
+BSPVertex operator*(const BSPVertex& v1, const float& d) {
+    BSPVertex temp;
+    temp.position = v1.position * d;
+    temp.texture_coord = v1.texture_coord * d;
+    temp.lightmap_coord = v1.lightmap_coord * d;
+    temp.normal = v1.normal * d;
+    return temp;
+}
 
-bool CQuake3BSP::LoadBSP(const char *strFileName) {
+void Quake3Bsp::tesselate(int control_offset, int control_width, int vert_offset, int index_offset) {
+    BSPVertex controls[9];
+    int cIndex = 0;
+    for (int c = 0; c < 3; c++) {
+        int pos = c * control_width;
+        controls[cIndex++] = _verts[control_offset + pos];
+        controls[cIndex++] = _verts[control_offset + pos + 1];
+        controls[cIndex++] = _verts[control_offset + pos + 2];
+    }
+
+    int L1 = BEZIER_LEVEL + 1;
+
+    for (int j = 0; j <= BEZIER_LEVEL; ++j) {
+        float a = (float)j / BEZIER_LEVEL;
+        float b = 1.f - a;
+        _verts[vert_offset + j] = controls[0] * b * b + controls[3] * 2 * b * a + controls[6] * a * a;
+    }
+
+    for (int i = 1; i <= BEZIER_LEVEL; ++i) {
+        float a = (float)i / BEZIER_LEVEL;
+        float b = 1.f - a;
+
+        BSPVertex temp[3];
+
+        for (int j = 0; j < 3; ++j) {
+            int k = 3 * j;
+            temp[j] = controls[k + 0] * b * b + controls[k + 1] * 2 * b * a + controls[k + 2] * a * a;
+        }
+
+        for (int j = 0; j <= BEZIER_LEVEL; ++j) {
+            float a = (float)j / BEZIER_LEVEL;
+            float b = 1.f - a;
+
+            _verts[vert_offset + i * L1 + j] = temp[0] * b * b + temp[1] * 2 * b * a + temp[2] * a * a;
+        }
+    }
+
+    for (int i = 0; i <= BEZIER_LEVEL; ++i) {
+        for (int j = 0; j <= BEZIER_LEVEL; ++j) {
+            int offset = index_offset + (i * BEZIER_LEVEL + j) * 6;
+            _indices[offset + 0] = (i    ) * L1 + (j    ) + vert_offset;
+            _indices[offset + 1] = (i    ) * L1 + (j + 1) + vert_offset;
+            _indices[offset + 2] = (i + 1) * L1 + (j + 1) + vert_offset;
+
+            _indices[offset + 3] = (i + 1) * L1 + (j + 1) + vert_offset;
+            _indices[offset + 4] = (i + 1) * L1 + (j    ) + vert_offset;
+            _indices[offset + 5] = (i    ) * L1 + (j    ) + vert_offset;
+        }
+    }
+}
+
+bool Quake3Bsp::load_bsp(const std::string &filename) {
     FILE *fp = NULL;
     int i = 0;
 
-    // Check if the .bsp file could be opened
-    if((fp = fopen(strFileName, "rb")) == NULL) {
-        // Display an error message and quit if the file can't be found.
-        std::cerr << "Could not find BSP file: " << strFileName << std::endl;
+    if((fp = fopen(filename.c_str(), "rb")) == NULL) {
+        _logger->error("Couldn't find BSP file {}", filename);
         return false;
     }
 
-    // Initialize the header and lump structures
-    tBSPHeader header = {0};
-    tBSPLump lumps[kMaxLumps] = {0};
+    BSPHeader header = {};
+    BSPLump lumps[LUMP_MAX_LUMPS] = {};
 
-    // Read in the header and lump data
-    fread(&header, 1, sizeof(tBSPHeader), fp);
-    fread(&lumps, kMaxLumps, sizeof(tBSPLump), fp);
+    fread(&header, 1, sizeof(BSPHeader), fp);
+    fread(&lumps, LUMP_MAX_LUMPS, sizeof(BSPLump), fp);
 
-    // Now we know all the information about our file.  We can
-    // then allocate the needed memory for our member variables.
+    size_t faces_num = lumps[LUMP_FACES].length / sizeof(BSPFace);
+    _faces.resize(faces_num);
 
-    // Allocate the vertex memory
-    m_numOfVerts = lumps[kVertices].length / sizeof(tBSPVertex);
-    m_pVerts     = new tBSPVertex [m_numOfVerts];
+    fseek(fp, lumps[LUMP_FACES].offset, SEEK_SET);
 
-    // Allocate the face memory
-    m_numOfFaces = lumps[kFaces].length / sizeof(tBSPFace);
-    m_pFaces     = new tBSPFace [m_numOfFaces];
+    fread(&_faces[0], faces_num, sizeof(BSPFace), fp);
+    int bezier_count = 0;
+	int bezier_patch_size = (BEZIER_LEVEL + 1) * (BEZIER_LEVEL + 1);
+	int bezier_index_size = BEZIER_LEVEL * BEZIER_LEVEL * 6;
+	for (int i = 0; i < faces_num; i++) {
+		if(_faces[i].type != FACE_PATCH) continue;
+		int dimx = (_faces[i].size[0] - 1) / 2;
+		int dimy = (_faces[i].size[0] - 1) / 2;
+		int size = dimx * dimy;
+		bezier_count += size;
+	}
 
-    // Allocate the index memory
-    m_numOfIndices = lumps[kIndices].length / sizeof(int);
-    m_pIndices     = new int [m_numOfIndices];
+    size_t indices_num = lumps[LUMP_INDICES].length / sizeof(int);
+    _indices.resize(indices_num + bezier_index_size * bezier_count);
 
-    // Allocate memory to read in the texture information.
-    m_numOfTextures = lumps[kTextures].length / sizeof(tBSPTexture);
-    m_pTextures = new tBSPTexture [m_numOfTextures];
+    size_t verts_num = lumps[LUMP_VERTICES].length / sizeof(BSPVertex);
+    _verts.resize(verts_num + bezier_patch_size * bezier_count);
 
-    // Allocate memory to read in the lightmap data.
-    m_numOfLightmaps = lumps[kLightmaps].length / sizeof(tBSPLightmap);
-    tBSPLightmap *pLightmaps = new tBSPLightmap [m_numOfLightmaps ];
+    _textures_num = lumps[LUMP_TEXTURES].length / sizeof(BSPTexture);
+    _textures.resize(_textures_num);
 
-    // Seek to the position in the file that stores the vertex information
-    fseek(fp, lumps[kVertices].offset, SEEK_SET);
+    _lightmaps_num = lumps[LUMP_LIGHTMAPS].length / sizeof(BSPLightmap);
+    std::vector<BSPLightmap> lightmaps(_lightmaps_num);
 
-    // Go through all of the vertices that need to be read and swap axis's
-    for(i = 0; i < m_numOfVerts; i++) {
-        // Read in the current vertex
-        fread(&m_pVerts[i], 1, sizeof(tBSPVertex), fp);
+    fseek(fp, lumps[LUMP_VERTICES].offset, SEEK_SET);
 
+
+    for(i = 0; i < verts_num; i++) {
+        fread(&_verts[i], 1, sizeof(BSPVertex), fp);
         // Swap the y and z values, and negate the new z so Y is up.
-        float temp = m_pVerts[i].vPosition.y;
-        m_pVerts[i].vPosition.y = m_pVerts[i].vPosition.z;
-        m_pVerts[i].vPosition.z = -temp;
+        float temp = _verts[i].position.y;
+        _verts[i].position.y = _verts[i].position.z;
+        _verts[i].position.z = -temp;
     }
 
-    // Seek to the position in the file that stores the index information
-    fseek(fp, lumps[kIndices].offset, SEEK_SET);
+    fseek(fp, lumps[LUMP_INDICES].offset, SEEK_SET);
 
-    // Read in all the index information
-    fread(m_pIndices, m_numOfIndices, sizeof(int), fp);
+    fread(&_indices[0], indices_num, sizeof(int), fp);
 
-    // Seek to the position in the file that stores the face information
-    fseek(fp, lumps[kFaces].offset, SEEK_SET);
 
-    // Read in all the face information
-    fread(m_pFaces, m_numOfFaces, sizeof(tBSPFace), fp);
+    //for (int i = 0, vOffset = verts_num, iOffset = indices_num; i < faces_num; i++) {
+        //BSPFace &face = _faces[i];
+        //if (face.type == FACE_PATCH) {
+            //int dimX = (face.size[0] - 1) / 2;
+            //int dimY = (face.size[1] - 1) / 2;
 
-    // Seek to the position in the file that stores the texture information
-    fseek(fp, lumps[kTextures].offset, SEEK_SET);
+            //face.start_index = iOffset;
 
-    // Read in all the texture information
-    fread(m_pTextures, m_numOfTextures, sizeof(tBSPTexture), fp);
+            //for (int x = 0, n = 0; n < dimX; n++, x = 2 * n) {
+                //for (int y = 0, m = 0; m < dimY; m++, y = 2 * m) {
+                    //tesselate(face.start_vert_index + x + face.size[0] * y,
+                              //face.size[0], vOffset, iOffset);
+                    //vOffset += bezier_patch_size;
+                    //iOffset += bezier_index_size;
+                //}
+            //}
 
-    // Go through all of the textures
-    for(i = 0; i < m_numOfTextures; i++) {
-        // Find the extension if any and append it to the file name
-        FindTextureExtension(m_pTextures[i].strName);
+            //face.indices_num = iOffset - face.start_index;
+        //} else {
+            //for (int i = 0; i < face.indices_num; i++) {
+                //_indices[face.start_index + i] += face.start_vert_index;
+            //}
+        //}
+    //}
 
-        // Create a texture from the image
-        CreateTexture(m_textures[i], m_pTextures[i].strName);
+    fseek(fp, lumps[LUMP_TEXTURES].offset, SEEK_SET);
+
+    fread(&_textures[0], _textures_num, sizeof(BSPTexture), fp);
+
+    for(i = 0; i < _textures_num; i++) {
+        find_texture(_textures[i].name);
+        create_texture(_textures_list[i], _textures[i].name);
     }
 
-    // Seek to the position in the file that stores the lightmap information
-    fseek(fp, lumps[kLightmaps].offset, SEEK_SET);
+    fseek(fp, lumps[LUMP_LIGHTMAPS].offset, SEEK_SET);
 
-    // Go through all of the lightmaps and read them in
-    for(i = 0; i < m_numOfLightmaps ; i++) {
-        // Read in the RGB data for each lightmap
-        fread(&pLightmaps[i], 1, sizeof(tBSPLightmap), fp);
+    for(i = 0; i < _lightmaps_num ; i++) {
+        fread(&lightmaps[i], 1, sizeof(BSPLightmap), fp);
 
         // Create a texture map for each lightmap that is read in.  The lightmaps
         // are always 128 by 128.
-        CreateLightmapTexture(m_lightmaps[i],
-                             (unsigned char *)pLightmaps[i].imageBits, 128, 128);
+        create_lightmap_texture(_lightmaps_list[i],
+                             (unsigned char *)lightmaps[i].imageBits, 128, 128);
     }
 
-    // Delete the image bits because we are already done with them
-    delete [] pLightmaps;
+    size_t nodes_num = lumps[LUMP_NODES].length / sizeof(BSPNode);
+    _nodes.resize(nodes_num);
 
-    // Store the number of nodes and allocate the memory to hold them
-    m_numOfNodes = lumps[kNodes].length / sizeof(tBSPNode);
-    m_pNodes     = new tBSPNode [m_numOfNodes];
+    fseek(fp, lumps[LUMP_NODES].offset, SEEK_SET);
+    fread(&_nodes[0], nodes_num, sizeof(BSPNode), fp);
 
-    // Seek to the position in the file that hold the nodes and store them in m_pNodes
-    fseek(fp, lumps[kNodes].offset, SEEK_SET);
-    fread(m_pNodes, m_numOfNodes, sizeof(tBSPNode), fp);
+    _leafs_num = lumps[LUMP_LEAFS].length / sizeof(BSPLeaf);
+    _leafs.resize(_leafs_num);
 
-    // Store the number of leafs and allocate the memory to hold them
-    m_numOfLeafs = lumps[kLeafs].length / sizeof(tBSPLeaf);
-    m_pLeafs     = new tBSPLeaf [m_numOfLeafs];
-
-    // Seek to the position in the file that holds the leafs and store them in m_pLeafs
-    fseek(fp, lumps[kLeafs].offset, SEEK_SET);
-    fread(m_pLeafs, m_numOfLeafs, sizeof(tBSPLeaf), fp);
+    fseek(fp, lumps[LUMP_LEAFS].offset, SEEK_SET);
+    fread(&_leafs[0], _leafs_num, sizeof(BSPLeaf), fp);
 
     // Now we need to go through and convert all the leaf bounding boxes
     // to the normal OpenGL Y up axis.
-    for(i = 0; i < m_numOfLeafs; i++) {
+    for(i = 0; i < _leafs_num; i++) {
         // Swap the min y and z values, then negate the new Z
-        int temp = m_pLeafs[i].min.y;
-        m_pLeafs[i].min.y = m_pLeafs[i].min.z;
-        m_pLeafs[i].min.z = -temp;
+        int temp = _leafs[i].min.y;
+        _leafs[i].min.y = _leafs[i].min.z;
+        _leafs[i].min.z = -temp;
 
         // Swap the max y and z values, then negate the new Z
-        temp = m_pLeafs[i].max.y;
-        m_pLeafs[i].max.y = m_pLeafs[i].max.z;
-        m_pLeafs[i].max.z = -temp;
+        temp = _leafs[i].max.y;
+        _leafs[i].max.y = _leafs[i].max.z;
+        _leafs[i].max.z = -temp;
     }
 
-    // Store the number of leaf faces and allocate the memory for them
-    m_numOfLeafFaces = lumps[kLeafFaces].length / sizeof(int);
-    m_pLeafFaces     = new int [m_numOfLeafFaces];
+    size_t leaf_faces_num = lumps[LUMP_LEAF_FACES].length / sizeof(int);
+    _leaf_faces.resize(leaf_faces_num);
 
-    // Seek to the leaf faces lump, then read it's data
-    fseek(fp, lumps[kLeafFaces].offset, SEEK_SET);
-    fread(m_pLeafFaces, m_numOfLeafFaces, sizeof(int), fp);
+    fseek(fp, lumps[LUMP_LEAF_FACES].offset, SEEK_SET);
+    fread(&_leaf_faces[0], leaf_faces_num, sizeof(int), fp);
 
-    // Store the number of planes, then allocate memory to hold them
-    m_numOfPlanes = lumps[kPlanes].length / sizeof(tBSPPlane);
-    m_pPlanes     = new tBSPPlane [m_numOfPlanes];
+    size_t planes_num = lumps[LUMP_PLANES].length / sizeof(BSPPlane);
+    _planes.resize(planes_num);
 
-    // Seek to the planes lump in the file, then read them into m_pPlanes
-    fseek(fp, lumps[kPlanes].offset, SEEK_SET);
-    fread(m_pPlanes, m_numOfPlanes, sizeof(tBSPPlane), fp);
+    fseek(fp, lumps[LUMP_PLANES].offset, SEEK_SET);
+    fread(&_planes[0], planes_num, sizeof(BSPPlane), fp);
 
-    // Go through every plane and convert it's normal to the Y-axis being up
-    for(i = 0; i < m_numOfPlanes; i++) {
-        float temp = m_pPlanes[i].vNormal.y;
-        m_pPlanes[i].vNormal.y = m_pPlanes[i].vNormal.z;
-        m_pPlanes[i].vNormal.z = -temp;
+    for(i = 0; i < planes_num; i++) {
+        float temp = _planes[i].normal.y;
+        _planes[i].normal.y = _planes[i].normal.z;
+        _planes[i].normal.z = -temp;
     }
 
-    // Seek to the position in the file that holds the visibility lump
-    fseek(fp, lumps[kVisData].offset, SEEK_SET);
+    fseek(fp, lumps[LUMP_VIS_DATA].offset, SEEK_SET);
 
-    // Check if there is any visibility information first
-    if(lumps[kVisData].length) {
-        // Read in the number of vectors and each vector's size
-        fread(&(m_clusters.numOfClusters),     1, sizeof(int), fp);
-        fread(&(m_clusters.bytesPerCluster), 1, sizeof(int), fp);
+    if(lumps[LUMP_VIS_DATA].length) {
+        fread(&(_clusters.clusters_num),     1, sizeof(int), fp);
+        fread(&(_clusters.bytes_per_cluster), 1, sizeof(int), fp);
 
-        // Allocate the memory for the cluster bitsets
-        int size = m_clusters.numOfClusters * m_clusters.bytesPerCluster;
-        m_clusters.pBitsets = new uint8_t [size];
+        int size = _clusters.clusters_num * _clusters.bytes_per_cluster;
+        _clusters.bitsets.resize(size);
 
-        // Read in the all the visibility bitsets for each cluster
-        fread(m_clusters.pBitsets, 1, sizeof(uint8_t) * size, fp);
+        fread(&_clusters.bitsets[0], 1, sizeof(uint8_t) * size, fp);
     }
-    // Otherwise, we don't have any visibility data (prevents a crash)
-    else
-        m_clusters.pBitsets = NULL;
 
-    // Like we do for other data, we read get the size of brushes and allocate memory
-    m_numOfBrushes = lumps[kBrushes].length / sizeof(int);
-    m_pBrushes     = new tBSPBrush [m_numOfBrushes];
+    size_t brushes_num = lumps[LUMP_BRUSHES].length / sizeof(int);
+    _brushes.resize(brushes_num);
 
-    // Here we read in the brush information from the BSP file
-    fseek(fp, lumps[kBrushes].offset, SEEK_SET);
-    fread(m_pBrushes, m_numOfBrushes, sizeof(tBSPBrush), fp);
+    fseek(fp, lumps[LUMP_BRUSHES].offset, SEEK_SET);
+    fread(&_brushes[0], brushes_num, sizeof(BSPBrush), fp);
 
-    // Get the size of brush sides, then allocate memory for it
-    m_numOfBrushSides = lumps[kBrushSides].length / sizeof(int);
-    m_pBrushSides     = new tBSPBrushSide [m_numOfBrushSides];
+    size_t brush_sides_num = lumps[LUMP_BRUSH_SIDES].length / sizeof(int);
+    _brush_sides.resize(brush_sides_num);
 
     // Read in the brush sides data
-    fseek(fp, lumps[kBrushSides].offset, SEEK_SET);
-    fread(m_pBrushSides, m_numOfBrushSides, sizeof(tBSPBrushSide), fp);
+    fseek(fp, lumps[LUMP_BRUSH_SIDES].offset, SEEK_SET);
+    fread(&_brush_sides[0], brush_sides_num, sizeof(BSPBrushSide), fp);
 
-    // Read in the number of leaf brushes and allocate memory for it
-    m_numOfLeafBrushes = lumps[kLeafBrushes].length / sizeof(int);
-    m_pLeafBrushes     = new int [m_numOfLeafBrushes];
+    size_t leaf_brushes_num = lumps[LUMP_LEAF_BRUSHES].length / sizeof(int);
+    _leaf_brushes.resize(leaf_brushes_num);
 
-    // Finally, read in the leaf brushes for traversing the bsp tree with brushes
-    fseek(fp, lumps[kLeafBrushes].offset, SEEK_SET);
-    fread(m_pLeafBrushes, m_numOfLeafBrushes, sizeof(int), fp);
+    fseek(fp, lumps[LUMP_LEAF_BRUSHES].offset, SEEK_SET);
+    fread(&_leaf_brushes[0], leaf_brushes_num, sizeof(int), fp);
 
-    // Close the file
     fclose(fp);
 
-    // Here we allocate enough bits to store all the faces for our bitset
-    m_FacesDrawn.Resize(m_numOfFaces);
+    _faces_drawn.resize(faces_num);
 
-    // Return a success
     return true;
 }
 
-
-//////////////////////////// FIND LEAF \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This returns the leaf our camera is in
-/////
-//////////////////////////// FIND LEAF \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-int CQuake3BSP::FindLeaf(const CVector3 &vPos) {
+int Quake3Bsp::find_leaf(const glm::vec3 &pos) {
     int i = 0;
     float distance = 0.0f;
 
@@ -471,14 +414,14 @@ int CQuake3BSP::FindLeaf(const CVector3 &vPos) {
         // Get the current node, then find the slitter plane from that
         // node's plane index.  Notice that we use a constant reference
         // to store the plane and node so we get some optimization.
-        const tBSPNode&  node = m_pNodes[i];
-        const tBSPPlane& plane = m_pPlanes[node.plane];
+        const BSPNode&  node = _nodes[i];
+        const BSPPlane& plane = _planes[node.plane];
 
         // Use the Plane Equation (Ax + by + Cz + D = 0) to find if the
         // camera is in front of or behind the current splitter plane.
-        distance =    plane.vNormal.x * vPos.x +
-                    plane.vNormal.y * vPos.y +
-                    plane.vNormal.z * vPos.z - plane.d;
+        distance =    plane.normal.x * pos.x +
+                    plane.normal.y * pos.y +
+                    plane.normal.z * pos.z - plane.d;
 
         // If the camera is in front of the plane
         if(distance >= 0) {
@@ -496,20 +439,13 @@ int CQuake3BSP::FindLeaf(const CVector3 &vPos) {
     return ~i;  // Binary operation
 }
 
-
-//////////////////////////// IS CLUSTER VISIBLE \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This tells us if the "current" cluster can see the "test" cluster
-/////
-//////////////////////////// IS CLUSTER VISIBLE \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-inline int CQuake3BSP::IsClusterVisible(int current, int test) {
+inline int Quake3Bsp::is_cluster_visible(int current, int test) {
     // Make sure we have valid memory and that the current cluster is > 0.
     // If we don't have any memory or a negative cluster, return a visibility (1).
-    if(!m_clusters.pBitsets || current < 0) return 1;
+    if(_clusters.bitsets.empty() || current < 0) return 1;
 
     // Use binary math to get the 8 bit visibility set for the current cluster
-    uint8_t visSet = m_clusters.pBitsets[(current*m_clusters.bytesPerCluster) + (test / 8)];
+    uint8_t visSet = _clusters.bitsets[(current*_clusters.bytes_per_cluster) + (test / 8)];
 
     // Now that we have our vector (bitset), do some bit shifting to find if
     // the "test" cluster is visible from the "current" cluster, according to the bitset.
@@ -519,253 +455,158 @@ inline int CQuake3BSP::IsClusterVisible(int current, int test) {
     return ( result );
 }
 
-
-/////////////////////////////////// DOT \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This computers the dot product of 2 vectors
-/////
-/////////////////////////////////// DOT \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-float Dot(CVector3 vVector1, CVector3 vVector2) {
-    //    (V1.x * V2.x        +        V1.y * V2.y        +        V1.z * V2.z)
-    return ( (vVector1.x * vVector2.x) + (vVector1.y * vVector2.y) + (vVector1.z * vVector2.z) );
-}
-
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-/////////////////////////////////// TRY TO STEP \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This checks a bunch of different heights to see if we can step up
-/////
-/////////////////////////////////// TRY TO STEP \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CVector3 CQuake3BSP::TryToStep(CVector3 vStart, CVector3 vEnd) {
-    // In this function we loop until we either found a reasonable height
-    // that we can step over, or find out that we can't step over anything.
-    // We check 10 times, each time increasing the step size to check for
-    // a collision.  If we don't collide, then we climb over the step.
+glm::vec3 Quake3Bsp::try_step(glm::vec3 start, glm::vec3 end) {
 
     // Go through and check different heights to step up
-    for(float height = 1.0f; height <= kMaxStepHeight; height++) {
+    for(float height = 1.0f; height <= MAX_STEP_HEIGHT; height++) {
         // Reset our variables for each loop interation
-        m_bCollided = false;
-        m_bTryStep = false;
+        _is_collided = false;
+        _is_try_step = false;
 
         // Here we add the current height to our y position of a new start and end.
         // If these 2 new start and end positions are okay, we can step up.
-        CVector3 vStepStart = CVector3(vStart.x, vStart.y + height, vStart.z);
-        CVector3 vStepEnd   = CVector3(vEnd.x, vStart.y + height, vEnd.z);
+        glm::vec3 stepStart = glm::vec3(start.x, start.y + height, start.z);
+        glm::vec3 stepEnd   = glm::vec3(end.x, start.y + height, end.z);
 
         // Test to see if the new position we are trying to step collides or not
-        CVector3 vStepPosition = Trace(vStepStart, vStepEnd);
+        glm::vec3 stepPosition = trace(stepStart, stepEnd);
 
-        // If we didn't collide, we can step!
-        if(!m_bCollided) {
-            // Here we get the current view, then increase the y value by the current height.
-            // This makes it so when we are walking up the stairs, our view follows our step
-            // height and doesn't sag down as we walk up the stairs.
-            //CVector3 vNewView = g_Camera.View();
-            //g_Camera.SetView(CVector3(vNewView.x, vNewView.y + height, vNewView.z));
+        if(!_is_collided) {
 
             // Return the current position since we stepped up somewhere
-            return vStepPosition;
+            return stepPosition;
         }
     }
 
     // If we can't step, then we just return the original position of the collision
-    return vStart;
+    return start;
 }
 
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
-/////////////////////////////////// TRACE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This takes a start and end position (general) to test against the BSP brushes
-/////
-/////////////////////////////////// TRACE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CVector3 CQuake3BSP::Trace(CVector3 vStart, CVector3 vEnd) {
+glm::vec3 Quake3Bsp::trace(glm::vec3 start, glm::vec3 end) {
     // Initially we set our trace ratio to 1.0f, which means that we don't have
     // a collision or intersection point, so we can move freely.
-    m_traceRatio = 1.0f;
+    _traceRatio = 1.0f;
 
     // We start out with the first node (0), setting our start and end ratio to 0 and 1.
     // We will recursively go through all of the nodes to see which brushes we should check.
-    CheckNode(0, 0.0f, 1.0f, vStart, vEnd);
+    check_node(0, 0.0f, 1.0f, start, end);
 
     // If the traceRatio is STILL 1.0f, then we never collided and just return our end position
-    if(m_traceRatio == 1.0f) {
-        return vEnd;
+    if(_traceRatio == 1.0f) {
+        return end;
     }
-    else {    // Else COLLISION!!!!
+    else {
         // Set our new position to a position that is right up to the brush we collided with
-        CVector3 vNewPosition = vStart + ((vEnd - vStart) * m_traceRatio);
+        glm::vec3 newPosition = start + ((end - start) * _traceRatio);
 
         // Get the distance from the end point to the new position we just got
-        CVector3 vMove = vEnd - vNewPosition;
+        glm::vec3 move = end - newPosition;
 
         // Get the distance we need to travel backwards to the new slide position.
         // This is the distance of course along the normal of the plane we collided with.
-        float distance = Dot(vMove, m_vCollisionNormal);
+        float distance = glm::dot(move, _collisionNormal);
 
         // Get the new end position that we will end up (the slide position).
-        CVector3 vEndPosition = vEnd - m_vCollisionNormal*distance;
+        glm::vec3 endPosition = end - _collisionNormal*distance;
 
         // Since we got a new position for our sliding vector, we need to check
         // to make sure that new sliding position doesn't collide with anything else.
-        vNewPosition = Trace(vNewPosition, vEndPosition);
+        newPosition = trace(newPosition, endPosition);
 
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-        //
-        if(m_vCollisionNormal.y > 0.2f || m_bGrounded)
-            m_bGrounded = true;
+        if(_collisionNormal.y > 0.2f || _is_grounded)
+            _is_grounded = true;
         else
-            m_bGrounded = false;
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
+            _is_grounded = false;
 
         // Return the new position to be used by our camera (or player)
-        return vNewPosition;
+        return newPosition;
     }
 }
 
-
-/////////////////////////////////// TRACE RAY \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This takes a start and end position (ray) to test against the BSP brushes
-/////
-/////////////////////////////////// TRACE RAY \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CVector3 CQuake3BSP::TraceRay(CVector3 vStart, CVector3 vEnd) {
+glm::vec3 Quake3Bsp::trace_ray(glm::vec3 start, glm::vec3 end) {
     // We don't use this function, but we set it up to allow us to just check a
     // ray with the BSP tree brushes.  We do so by setting the trace type to TYPE_RAY.
-    m_traceType = TYPE_RAY;
+    _traceType = TYPE_RAY;
 
-    // Run the normal Trace() function with our start and end
+    // Run the normal trace() function with our start and end
     // position and return a new position
-    return Trace(vStart, vEnd);
+    return trace(start, end);
 }
 
 
-/////////////////////////////////// TRACE SPHERE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This tests a sphere around our movement vector against the BSP brushes for collision
-/////
-/////////////////////////////////// TRACE SPHERE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CVector3 CQuake3BSP::TraceSphere(CVector3 vStart, CVector3 vEnd, float radius) {
+glm::vec3 Quake3Bsp::trace_sphere(glm::vec3 start, glm::vec3 end, float radius) {
     // Here we initialize the type of trace (SPHERE) and initialize other data
-    m_traceType = TYPE_SPHERE;
-    m_bCollided = false;
-
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
+    _traceType = TYPE_SPHERE;
+    _is_collided = false;
 
     // Here we initialize our variables for a new round of collision checks
-    m_bTryStep = false;
-    m_bGrounded = false;
+    _is_try_step = false;
+    _is_grounded = false;
 
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
-    m_traceRadius = radius;
+    _traceRadius = radius;
 
     // Get the new position that we will return to the camera or player
-    CVector3 vNewPosition = Trace(vStart, vEnd);
-
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
+    glm::vec3 newPosition = trace(start, end);
 
     // Let's check to see if we collided with something and we should try to step up
-    if(m_bCollided && m_bTryStep) {
+    if(_is_collided && _is_try_step) {
         // Try and step up what we collided with
-        vNewPosition = TryToStep(vNewPosition, vEnd);
+        newPosition = try_step(newPosition, end);
     }
 
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
     // Return the new position to be changed for the camera or player
-    return vNewPosition;
+    return newPosition;
 }
 
+glm::vec3 Quake3Bsp::trace_box(glm::vec3 start, glm::vec3 end, glm::vec3 min, glm::vec3 max) {
+    _traceType = TYPE_BOX;            // Set the trace type to a BOX
+    _traceMaxs = max;            // Set the max value of our AABB
+    _traceMins = min;            // Set the min value of our AABB
+    _is_collided = false;            // Reset the collised flag
 
-/////////////////////////////////// TRACE BOX \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This takes a start and end position to test a AABB (box) against the BSP brushes
-/////
-/////////////////////////////////// TRACE BOX \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CVector3 CQuake3BSP::TraceBox(CVector3 vStart, CVector3 vEnd, CVector3 vMin, CVector3 vMax) {
-    m_traceType = TYPE_BOX;            // Set the trace type to a BOX
-    m_vTraceMaxs = vMax;            // Set the max value of our AABB
-    m_vTraceMins = vMin;            // Set the min value of our AABB
-    m_bCollided = false;            // Reset the collised flag
-
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
 
     // Here we initialize our variables for a new round of collision checks
-    m_bTryStep = false;
-    m_bGrounded = false;
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
+    _is_try_step = false;
+    _is_grounded = false;
 
     // Grab the extend of our box (the largest size for each x, y, z axis)
-    m_vExtents = CVector3(-m_vTraceMins.x > m_vTraceMaxs.x ? -m_vTraceMins.x : m_vTraceMaxs.x,
-                          -m_vTraceMins.y > m_vTraceMaxs.y ? -m_vTraceMins.y : m_vTraceMaxs.y,
-                          -m_vTraceMins.z > m_vTraceMaxs.z ? -m_vTraceMins.z : m_vTraceMaxs.z);
+    _extents = glm::vec3(-_traceMins.x > _traceMaxs.x ? -_traceMins.x : _traceMaxs.x,
+                          -_traceMins.y > _traceMaxs.y ? -_traceMins.y : _traceMaxs.y,
+                          -_traceMins.z > _traceMaxs.z ? -_traceMins.z : _traceMaxs.z);
 
 
     // Check if our movement collided with anything, then get back our new position
-    CVector3 vNewPosition = Trace(vStart, vEnd);
+    glm::vec3 newPosition = trace(start, end);
 
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
 
     // Let's check to see if we collided with something and we should try to step up
-    if(m_bCollided && m_bTryStep) {
+    if(_is_collided && _is_try_step) {
         // Try and step up what we collided with
-        vNewPosition = TryToStep(vNewPosition, vEnd);
+        newPosition = try_step(newPosition, end);
     }
 
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
     // Return our new position
-    return vNewPosition;
+    return newPosition;
 }
 
 
-/////////////////////////////////// CHECK NODE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This traverses the BSP to find the brushes closest to our position
-/////
-/////////////////////////////////// CHECK NODE \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::CheckNode(int nodeIndex, float startRatio, float endRatio, CVector3 vStart, CVector3 vEnd) {
+void Quake3Bsp::check_node(int nodeIndex, float startRatio, float endRatio, glm::vec3 start, glm::vec3 end) {
     // Check if the next node is a leaf
     if(nodeIndex < 0) {
         // If this node in the BSP is a leaf, we need to negate and add 1 to offset
-        // the real node index into the m_pLeafs[] array.  You could also do [~nodeIndex].
-        tBSPLeaf *pLeaf = &m_pLeafs[-(nodeIndex + 1)];
+        // the real node index into the _leafs[] array.  You could also do [~nodeIndex].
+        BSPLeaf *pLeaf = &_leafs[-(nodeIndex + 1)];
 
         // We have a leaf, so let's go through all of the brushes for that leaf
-        for(int i = 0; i < pLeaf->numOfLeafBrushes; i++) {
+        for(int i = 0; i < pLeaf->leaf_brushes_num; i++) {
             // Get the current brush that we going to check
-            tBSPBrush *pBrush = &m_pBrushes[m_pLeafBrushes[pLeaf->leafBrush + i]];
+            BSPBrush *pBrush = &_brushes[_leaf_brushes[pLeaf->leaf_brush + i]];
 
             // Check if we have brush sides and the current brush is solid and collidable
-            if((pBrush->numOfBrushSides > 0) && (m_pTextures[pBrush->textureID].textureType & 1)) {
+            if((pBrush->brush_sides_num > 0) && (_textures[pBrush->texture_id].texture_type & 1)) {
                 // Now we delve into the dark depths of the real calculations for collision.
                 // We can now check the movement vector against our brush planes.
-                CheckBrush(pBrush, vStart, vEnd);
+                check_brush(pBrush, start, end);
             }
         }
 
@@ -774,43 +615,43 @@ void CQuake3BSP::CheckNode(int nodeIndex, float startRatio, float endRatio, CVec
     }
 
     // Grad the next node to work with and grab this node's plane data
-    tBSPNode *pNode = &m_pNodes[nodeIndex];
-    tBSPPlane *pPlane = &m_pPlanes[pNode->plane];
+    BSPNode *pNode = &_nodes[nodeIndex];
+    BSPPlane *pPlane = &_planes[pNode->plane];
 
     // Here we use the plane equation to find out where our initial start position is
     // according the the node that we are checking.  We then grab the same info for the end pos.
-    float startDistance = Dot(vStart, pPlane->vNormal) - pPlane->d;
-    float endDistance = Dot(vEnd, pPlane->vNormal) - pPlane->d;
+    float startDistance = glm::dot(start, pPlane->normal) - pPlane->d;
+    float endDistance = glm::dot(end, pPlane->normal) - pPlane->d;
     float offset = 0.0f;
 
     // If we are doing sphere collision, include an offset for our collision tests below
-    if(m_traceType == TYPE_SPHERE)
-        offset = m_traceRadius;
+    if(_traceType == TYPE_SPHERE)
+        offset = _traceRadius;
 
     // Here we check to see if we are working with a BOX or not
-    else if(m_traceType == TYPE_BOX) {
+    else if(_traceType == TYPE_BOX) {
         // Get the distance our AABB is from the current splitter plane
-        offset = (float)(fabs( m_vExtents.x * pPlane->vNormal.x ) +
-                         fabs( m_vExtents.y * pPlane->vNormal.y ) +
-                         fabs( m_vExtents.z * pPlane->vNormal.z ) );
+        offset = (float)(fabs( _extents.x * pPlane->normal.x ) +
+                         fabs( _extents.y * pPlane->normal.y ) +
+                         fabs( _extents.z * pPlane->normal.z ) );
     }
 
     // Here we check to see if the start and end point are both in front of the current node.
     // If so, we want to check all of the nodes in front of this current splitter plane.
     if(startDistance >= offset && endDistance >= offset) {
         // Traverse the BSP tree on all the nodes in front of this current splitter plane
-        CheckNode(pNode->front, startDistance, endDistance, vStart, vEnd);
+        check_node(pNode->front, startDistance, endDistance, start, end);
     }
     // If both points are behind the current splitter plane, traverse down the back nodes
     else if(startDistance < -offset && endDistance < -offset) {
         // Traverse the BSP tree on all the nodes in back of this current splitter plane
-        CheckNode(pNode->back, startDistance, endDistance, vStart, vEnd);
+        check_node(pNode->back, startDistance, endDistance, start, end);
     }
     else {
         // If we get here, then our ray needs to be split in half to check the nodes
         // on both sides of the current splitter plane.  Thus we create 2 ratios.
         float Ratio1 = 1.0f, Ratio2 = 0.0f, middleRatio = 0.0f;
-        CVector3 vMiddle;    // This stores the middle point for our split ray
+        glm::vec3 middle;    // This stores the middle point for our split ray
 
         // Start of the side as the front side to check
         int side = pNode->front;
@@ -823,16 +664,16 @@ void CQuake3BSP::CheckNode(int nodeIndex, float startRatio, float endRatio, CVec
             // Here we create 2 ratios that hold a distance from the start to the
             // extent closest to the start (take into account a sphere and epsilon).
             float inverseDistance = 1.0f / (startDistance - endDistance);
-            Ratio1 = (startDistance - offset - kEpsilon) * inverseDistance;
-            Ratio2 = (startDistance + offset + kEpsilon) * inverseDistance;
+            Ratio1 = (startDistance - offset - M_EPS) * inverseDistance;
+            Ratio2 = (startDistance + offset + M_EPS) * inverseDistance;
         }
         // Check if the starting point is greater than the end point (positive)
         else if(startDistance > endDistance) {
             // This means that we are going to recurse down the front nodes first.
             // We do the same thing as above and get 2 ratios for split ray.
             float inverseDistance = 1.0f / (startDistance - endDistance);
-            Ratio1 = (startDistance + offset + kEpsilon) * inverseDistance;
-            Ratio2 = (startDistance - offset - kEpsilon) * inverseDistance;
+            Ratio1 = (startDistance + offset + M_EPS) * inverseDistance;
+            Ratio2 = (startDistance - offset - M_EPS) * inverseDistance;
         }
 
         // Make sure that we have valid numbers and not some weird float problems.
@@ -843,73 +684,66 @@ void CQuake3BSP::CheckNode(int nodeIndex, float startRatio, float endRatio, CVec
         if (Ratio2 < 0.0f) Ratio2 = 0.0f;
         else if (Ratio2 > 1.0f) Ratio2 = 1.0f;
 
-        // Just like we do in the Trace() function, we find the desired middle
+        // Just like we do in the trace() function, we find the desired middle
         // point on the ray, but instead of a point we get a middleRatio percentage.
         middleRatio = startRatio + ((endRatio - startRatio) * Ratio1);
-        vMiddle = vStart + ((vEnd - vStart) * Ratio1);
+        middle = start + ((end - start) * Ratio1);
 
         // Now we recurse on the current side with only the first half of the ray
-        CheckNode(side, startRatio, middleRatio, vStart, vMiddle);
+        check_node(side, startRatio, middleRatio, start, middle);
 
         // Now we need to make a middle point and ratio for the other side of the node
         middleRatio = startRatio + ((endRatio - startRatio) * Ratio2);
-        vMiddle = vStart + ((vEnd - vStart) * Ratio2);
+        middle = start + ((end - start) * Ratio2);
 
         // Depending on which side should go last, traverse the bsp with the
         // other side of the split ray (movement vector).
         if(side == pNode->back)
-            CheckNode(pNode->front, middleRatio, endRatio, vMiddle, vEnd);
+            check_node(pNode->front, middleRatio, endRatio, middle, end);
         else
-            CheckNode(pNode->back, middleRatio, endRatio, vMiddle, vEnd);
+            check_node(pNode->back, middleRatio, endRatio, middle, end);
     }
 }
 
-
-/////////////////////////////////// CHECK BRUSH \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This checks our movement vector against all the planes of the brush
-/////
-/////////////////////////////////// CHECK BRUSH \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::CheckBrush(tBSPBrush *pBrush, CVector3 vStart, CVector3 vEnd) {
+void Quake3Bsp::check_brush(BSPBrush *pBrush, glm::vec3 start, glm::vec3 end) {
     float startRatio = -1.0f;        // Like in BrushCollision.htm, start a ratio at -1
     float endRatio = 1.0f;            // Set the end ratio to 1
     bool startsOut = false;            // This tells us if we starting outside the brush
 
     // Go through all of the brush sides and check collision against each plane
-    for(int i = 0; i < pBrush->numOfBrushSides; i++) {
+    for(int i = 0; i < pBrush->brush_sides_num; i++) {
         // Here we grab the current brush side and plane in this brush
-        tBSPBrushSide *pBrushSide = &m_pBrushSides[pBrush->brushSide + i];
-        tBSPPlane *pPlane = &m_pPlanes[pBrushSide->plane];
+        BSPBrushSide *pBrushSide = &_brush_sides[pBrush->brush_side + i];
+        BSPPlane *pPlane = &_planes[pBrushSide->plane];
 
         // Let's store a variable for the offset (like for sphere collision)
         float offset = 0.0f;
 
         // If we are testing sphere collision we need to add the sphere radius
-        if(m_traceType == TYPE_SPHERE)
-            offset = m_traceRadius;
+        if(_traceType == TYPE_SPHERE)
+            offset = _traceRadius;
 
         // Test the start and end points against the current plane of the brush side.
         // Notice that we add an offset to the distance from the origin, which makes
         // our sphere collision work.
-        float startDistance = Dot(vStart, pPlane->vNormal) - (pPlane->d + offset);
-        float endDistance = Dot(vEnd, pPlane->vNormal) - (pPlane->d + offset);
+        float startDistance = glm::dot(start, pPlane->normal) - (pPlane->d + offset);
+        float endDistance = glm::dot(end, pPlane->normal) - (pPlane->d + offset);
 
         // Store the offset that we will check against the plane
-        CVector3 vOffset = CVector3(0, 0, 0);
+        glm::vec3 offset_vec = glm::vec3(0, 0, 0);
 
         // If we are using AABB collision
-        if(m_traceType == TYPE_BOX) {
+        if(_traceType == TYPE_BOX) {
             // Grab the closest corner (x, y, or z value) that is closest to the plane
-            vOffset.x = (pPlane->vNormal.x < 0)    ? m_vTraceMaxs.x : m_vTraceMins.x;
-            vOffset.y = (pPlane->vNormal.y < 0)    ? m_vTraceMaxs.y : m_vTraceMins.y;
-            vOffset.z = (pPlane->vNormal.z < 0)    ? m_vTraceMaxs.z : m_vTraceMins.z;
+            offset_vec.x = (pPlane->normal.x < 0)    ? _traceMaxs.x : _traceMins.x;
+            offset_vec.y = (pPlane->normal.y < 0)    ? _traceMaxs.y : _traceMins.y;
+            offset_vec.z = (pPlane->normal.z < 0)    ? _traceMaxs.z : _traceMins.z;
 
             // Use the plane equation to grab the distance our start position is from the plane.
-            startDistance = Dot(vStart + vOffset, pPlane->vNormal) - pPlane->d;
+            startDistance = glm::dot(start + offset_vec, pPlane->normal) - pPlane->d;
 
             // Get the distance our end position is from this current brush plane
-            endDistance   = Dot(vEnd + vOffset, pPlane->vNormal) - pPlane->d;
+            endDistance   = glm::dot(end + offset_vec, pPlane->normal) - pPlane->d;
         }
 
         // Make sure we start outside of the brush's volume
@@ -926,45 +760,39 @@ void CQuake3BSP::CheckBrush(tBSPBrush *pBrush, CVector3 vStart, CVector3 vEnd) {
         // If the distance of the start point is greater than the end point, we have a collision!
         if(startDistance > endDistance) {
             // This gets a ratio from our starting point to the approximate collision spot
-            float Ratio1 = (startDistance - kEpsilon) / (startDistance - endDistance);
+            float Ratio1 = (startDistance - M_EPS) / (startDistance - endDistance);
 
             // If this is the first time coming here, then this will always be true,
             if(Ratio1 > startRatio) {
                 // Set the startRatio (currently the closest collision distance from start)
                 startRatio = Ratio1;
-                m_bCollided = true;        // Let us know we collided!
+                _is_collided = true;        // Let us know we collided!
 
                 // Store the normal of plane that we collided with for sliding calculations
-                m_vCollisionNormal = pPlane->vNormal;
+                _collisionNormal = pPlane->normal;
 
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
 
                 // This checks first tests if we actually moved along the x or z-axis,
                 // meaning that we went in a direction somewhere.  The next check makes
                 // sure that we don't always check to step every time we collide.  If
                 // the normal of the plane has a Y value of 1, that means it's just the
                 // flat ground and we don't need to check if we can step over it, it's flat!
-                if((vStart.x != vEnd.x || vStart.z != vEnd.z) && pPlane->vNormal.y != 1) {
+                if((start.x != end.x || start.z != end.z) && pPlane->normal.y != 1) {
                     // We can try and step over the wall we collided with
-                    m_bTryStep = true;
+                    _is_try_step = true;
                 }
 
                 // Here we make sure that we don't slide slowly down walls when we
                 // jump and collide into them.  We only want to say that we are on
                 // the ground if we actually have stopped from falling.  A wall wouldn't
                 // have a high y value for the normal, it would most likely be 0.
-                if(m_vCollisionNormal.y >= 0.2f)
-                    m_bGrounded = true;
-
-/////// * /////////// * /////////// * NEW * /////// * /////////// * /////////// *
-
-
+                if(_collisionNormal.y >= 0.2f)
+                    _is_grounded = true;
             }
         }
         else {
             // Get the ratio of the current brush side for the endRatio
-            float Ratio = (startDistance + kEpsilon) / (startDistance - endDistance);
+            float Ratio = (startDistance + M_EPS) / (startDistance - endDistance);
 
             // If the ratio is less than the current endRatio, assign a new endRatio.
             // This will usually always be true when starting out.
@@ -981,32 +809,25 @@ void CQuake3BSP::CheckBrush(tBSPBrush *pBrush, CVector3 vStart, CVector3 vEnd) {
     // If our startRatio is less than the endRatio there was a collision!!!
     if(startRatio < endRatio) {
         // Make sure the startRatio moved from the start and check if the collision
-        // ratio we just got is less than the current ratio stored in m_traceRatio.
+        // ratio we just got is less than the current ratio stored in _traceRatio.
         // We want the closest collision to our original starting position.
-        if(startRatio > -1 && startRatio < m_traceRatio) {
+        if(startRatio > -1 && startRatio < _traceRatio) {
             // If the startRatio is less than 0, just set it to 0
             if(startRatio < 0)
                 startRatio = 0;
 
             // Store the new ratio in our member variable for later
-            m_traceRatio = startRatio;
+            _traceRatio = startRatio;
         }
     }
 }
 
-
-//////////////////////////// RENDER FACE \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This renders a face, determined by the passed in index
-/////
-//////////////////////////// RENDER FACE \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::RenderFace(int faceIndex) {
-// Here we grab the face from the index passed in
-    tBSPFace *pFace = &m_pFaces[faceIndex];
+void Quake3Bsp::render_face(int faceIndex) {
+    // Here we grab the face from the index passed in
+    BSPFace *pFace = &_faces[faceIndex];
 
     // Assign our array of face vertices for our vertex arrays and enable vertex arrays
-    glVertexPointer(3, GL_FLOAT, sizeof(tBSPVertex), &(m_pVerts[pFace->startVertIndex].vPosition));
+    glVertexPointer(3, GL_FLOAT, sizeof(BSPVertex), &(_verts[pFace->start_vert_index].position));
     glEnableClientState(GL_VERTEX_ARRAY);
 
     // If we want to render the textures
@@ -1016,8 +837,8 @@ void CQuake3BSP::RenderFace(int faceIndex) {
 
         // Give OpenGL the texture coordinates for the first texture, and enable that texture
         glClientActiveTextureARB(GL_TEXTURE0_ARB);
-        glTexCoordPointer(2, GL_FLOAT, sizeof(tBSPVertex),
-                                       &(m_pVerts[pFace->startVertIndex].vTextureCoord));
+        glTexCoordPointer(2, GL_FLOAT, sizeof(BSPVertex),
+                                       &(_verts[pFace->start_vert_index].texture_coord));
 
         // Set our vertex array client states for allowing texture coordinates
         glEnableClientState(GL_TEXTURE_COORD_ARRAY);
@@ -1027,7 +848,7 @@ void CQuake3BSP::RenderFace(int faceIndex) {
 
         // Turn on texture mapping and bind the face's texture map
         glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D,  m_textures[pFace->textureID]);
+        glBindTexture(GL_TEXTURE_2D,  _textures_list[pFace->texture_id]);
     }
 
     if(g_bLightmaps) {
@@ -1041,163 +862,69 @@ void CQuake3BSP::RenderFace(int faceIndex) {
         // Next, we need to specify the UV coordinates for our lightmaps.  This is done
         // by switching to the second texture and giving OpenGL our lightmap array.
         glClientActiveTextureARB(GL_TEXTURE1_ARB);
-        glTexCoordPointer(2, GL_FLOAT, sizeof(tBSPVertex),
-                                       &(m_pVerts[pFace->startVertIndex].vLightmapCoord));
+        glTexCoordPointer(2, GL_FLOAT, sizeof(BSPVertex),
+                                       &(_verts[pFace->start_vert_index].lightmap_coord));
 
         // Turn on texture mapping and bind the face's lightmap over the texture
         glEnable(GL_TEXTURE_2D);
-        glBindTexture(GL_TEXTURE_2D,  m_lightmaps[pFace->lightmapID]);
+        glBindTexture(GL_TEXTURE_2D,  _lightmaps_list[pFace->lightmap_id]);
     }
 
     // Render our current face to the screen with vertex arrays
-    glDrawElements(GL_TRIANGLES, pFace->numOfIndices, GL_UNSIGNED_INT, &(m_pIndices[pFace->startIndex]) );
+    glDrawElements(GL_TRIANGLES, pFace->indices_num, GL_UNSIGNED_INT, &(_indices[pFace->start_index]) );
 }
 
 
-//////////////////////////// RENDER LEVEL \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    Goes through all of the faces and draws them if the type is FACE_POLYGON
-/////
-//////////////////////////// RENDER LEVEL \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::RenderLevel(const CVector3 &vPos) {
+void Quake3Bsp::render(const glm::vec3 &pos) {
     // Reset our bitset so all the slots are zero.
-    m_FacesDrawn.ClearAll();
+    std::fill(_faces_drawn.begin(), _faces_drawn.end(), 0);
 
     // Grab the leaf index that our camera is in
-    int leafIndex = FindLeaf(vPos);
+    int leafIndex = find_leaf(pos);
 
     // Grab the cluster that is assigned to the leaf
-    int cluster = m_pLeafs[leafIndex].cluster;
+    int cluster = _leafs[leafIndex].cluster;
 
     // Initialize our counter variables (start at the last leaf and work down)
-    int i = m_numOfLeafs;
+    int i = _leafs_num;
     g_VisibleFaces = 0;
 
     // Go through all the leafs and check their visibility
     while(i--) {
         // Get the current leaf that is to be tested for visibility from our camera's leaf
-        tBSPLeaf *pLeaf = &(m_pLeafs[i]);
+        BSPLeaf *pLeaf = &(_leafs[i]);
 
         // If the current leaf can't be seen from our cluster, go to the next leaf
-        if(!IsClusterVisible(cluster, pLeaf->cluster))
+        if(!is_cluster_visible(cluster, pLeaf->cluster))
             continue;
-
-        // If the current leaf is not in the camera's frustum, go to the next leaf
-        //if(!g_Frustum.BoxInFrustum((float)pLeaf->min.x, (float)pLeaf->min.y, (float)pLeaf->min.z,
-                                      //(float)pLeaf->max.x, (float)pLeaf->max.y, (float)pLeaf->max.z))
-            //continue;
 
         // If we get here, the leaf we are testing must be visible in our camera's view.
         // Get the number of faces that this leaf is in charge of.
-        int faceCount = pLeaf->numOfLeafFaces;
+        int faceCount = pLeaf->leaf_faces_num;
 
         // Loop through and render all of the faces in this leaf
         while(faceCount--) {
             // Grab the current face index from our leaf faces array
-            int faceIndex = m_pLeafFaces[pLeaf->leafface + faceCount];
-
-            // Before drawing this face, make sure it's a normal polygon
-            if(m_pFaces[faceIndex].type != FACE_POLYGON) continue;
+            int faceIndex = _leaf_faces[pLeaf->leafface + faceCount];
 
             // Since many faces are duplicated in other leafs, we need to
             // make sure this face already hasn't been drawn.
-            if(!m_FacesDrawn.On(faceIndex)) {
+            if(!_faces_drawn[faceIndex])  {
                 // Increase the rendered face count to display for fun
                 g_VisibleFaces++;
 
-                // Set this face as drawn and render it
-                m_FacesDrawn.Set(faceIndex);
-                RenderFace(faceIndex);
+                _faces_drawn[faceIndex] = true;
+                render_face(faceIndex);
             }
         }
     }
 }
 
-
-//////////////////////////// DESTROY \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This cleans up our object and frees allocated memory
-/////
-//////////////////////////// DESTROY \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-void CQuake3BSP::Destroy() {
-    // If we still have valid memory for our vertices, free them
-    if(m_pVerts) {
-        delete [] m_pVerts;        m_pVerts = NULL;
-    }
-
-    // If we still have valid memory for our faces, free them
-    if(m_pFaces) {
-        delete [] m_pFaces;        m_pFaces = NULL;
-    }
-
-    // If we still have valid memory for our indices, free them
-    if(m_pIndices) {
-        delete [] m_pIndices;
-        m_pIndices = NULL;
-    }
-
-    // If we still have valid memory for our nodes, free them
-    if(m_pNodes) {
-        delete [] m_pNodes;        m_pNodes = NULL;
-    }
-
-    // If we still have valid memory for our leafs, free them
-    if(m_pLeafs) {
-        delete [] m_pLeafs;        m_pLeafs = NULL;
-    }
-
-    // If we still have valid memory for our leaf faces, free them
-    if(m_pLeafFaces) {
-        delete [] m_pLeafFaces;    m_pLeafFaces = NULL;
-    }
-
-    // If we still have valid memory for our planes, free them
-    if(m_pPlanes) {
-        delete [] m_pPlanes;    m_pPlanes = NULL;
-    }
-
-    // If we still have valid memory for our clusters, free them
-    if(m_clusters.pBitsets) {
-        delete [] m_clusters.pBitsets;        m_clusters.pBitsets = NULL;
-    }
-
-    // If we still have valid memory for our brushes, free them
-    if(m_pBrushes) {
-        delete [] m_pBrushes;        m_pBrushes = NULL;
-    }
-
-    // If we still have valid memory for our brush sides, free them
-    if(m_pBrushSides) {
-        delete [] m_pBrushSides;    m_pBrushSides = NULL;
-    }
-
-    // If we still have valid memory for our leaf brushes, free them
-    if(m_pLeafBrushes) {
-        delete [] m_pLeafBrushes;    m_pLeafBrushes = NULL;
-    }
-
-    // If we still have valid memory for our BSP texture info, free it
-    if(m_pTextures) {
-        delete [] m_pTextures;        m_pTextures = NULL;
-    }
-
-    // Free all the textures
-    glDeleteTextures(m_numOfTextures, m_textures);
-
-    // Delete the lightmap textures
-    glDeleteTextures(m_numOfLightmaps, m_lightmaps);
+void Quake3Bsp::destroy() {
+    glDeleteTextures(_textures_num, _textures_list);
+    glDeleteTextures(_lightmaps_num, _lightmaps_list);
 }
 
-
-//////////////////////////// ~CQUAKE3BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-/////
-/////    This is our deconstructor that is called when the object is destroyed
-/////
-//////////////////////////// ~CQUAKE3BSP \\\\\\\\\\\\\\\\\\\\\\\\\\\*
-
-CQuake3BSP::~CQuake3BSP() {
-    // Call our destroy function
-    Destroy();
+Quake3Bsp::~Quake3Bsp() {
+    destroy();
 }

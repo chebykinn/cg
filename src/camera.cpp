@@ -2,6 +2,9 @@
 
 #include <SDL2/SDL.h>
 
+#include <GL/gl.h>
+#include <GL/glu.h>
+
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/transform.hpp>
@@ -9,11 +12,11 @@
 #include <game/camera.h>
 #include <game/config.h>
 
-static double current_time = 0.0f;
-static double last_time    = SDL_GetTicks();
 static float delta_time   = 0.0f;
 static float horizontal_angle = 3.14f;
 static float vertical_angle = 0.0f;
+
+static float g = 9.8f;
 
 using namespace game;
 
@@ -23,12 +26,18 @@ Camera::Camera() {
         _logger = spdlog::stdout_color_mt(Config::logger_name());
 }
 
+glm::vec3 Camera::velocity(const glm::vec3 &velocity) {
+    auto n_v = velocity;
+    n_v.y -= g * delta_time;
+    _position += n_v;
+    return n_v;
+}
+
 void Camera::position(const glm::vec3 &new_pos) {
     _position = new_pos;
 }
 
 void Camera::move(float speed) {
-    assert(delta_time > 0 && "Camera is not updating");
     _position += _direction * delta_time * speed;
 }
 
@@ -36,10 +45,8 @@ void Camera::strafe(float speed) {
     _position += _right * delta_time * speed;
 }
 
-void Camera::update(float mx, float my) {
-    current_time = SDL_GetTicks();
-    delta_time = current_time - last_time;
-    last_time = current_time;
+void Camera::update(float mx, float my, float frame_interval) {
+    delta_time = frame_interval;
 
     // Compute new orientation
     horizontal_angle -= delta_time * mx;
@@ -66,12 +73,11 @@ void Camera::update(float mx, float my) {
     glm::vec3 up = glm::cross( _right, _direction );
 
     // Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1 unit <-> 100 units
-    _projection = glm::perspective(glm::radians(_field_of_view), width / height, 0.1f, 100.0f);
+    gluPerspective(90.0f, width / height, 0.1f, 10000.0f);
 
-    // Camera matrix
-    _view = glm::lookAt(
-        _position, // Camera is at (4,3,3), in World Space
-        _position + _direction, // and looks at the origin
-        up  // Head is up (set to 0,-1,0 to look upside-down)
-        );
+    gluLookAt(_position.x, _position.y, _position.z,
+    _position.x + _direction.x, _position.y + _direction.y, _position.z + _direction.z,
+    up.x, up.y, up.z);
+
+
 }

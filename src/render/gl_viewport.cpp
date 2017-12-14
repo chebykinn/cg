@@ -1,5 +1,13 @@
+#ifdef __APPLE__
+#include <OpenGL/glew.h>
+#else
 #include <GL/glew.h>
+#endif
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#else
 #include <GL/gl.h>
+#endif
 #include <game/render/gl_viewport.h>
 #include <game/sys/glsl.h>
 #include <game/config.h>

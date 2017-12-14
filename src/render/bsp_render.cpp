@@ -1,6 +1,18 @@
+#ifdef __APPLE__
+#include <OpenGL/glew.h>
+#else
 #include <GL/glew.h>
+#endif
+#ifdef __APPLE__
+#include <OpenGL/gl.h>
+#else
 #include <GL/gl.h>
+#endif
+#ifdef __APPLE__
+#include <OpenGL/glu.h>
+#else
 #include <GL/glu.h>
+#endif
 
 #include <game/config.h>
 #include <game/render/bsp_render.h>

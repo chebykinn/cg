@@ -19,6 +19,8 @@ private:
     const char *_last_error = nullptr;
 
     std::shared_ptr<Camera> _camera;
+
+    float _frame_interval = 0.0f;
 public:
     GLViewport(glm::tvec2<size_t> new_size, Window &window);
     ~GLViewport();
@@ -34,6 +36,9 @@ public:
     void camera(const std::shared_ptr<Camera> &new_camera) {
         _camera = new_camera;
     }
+
+    void update_frame_rate();
+    float frame_interval() const { return _frame_interval; }
 };
 }
 }

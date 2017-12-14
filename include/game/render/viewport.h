@@ -20,6 +20,9 @@ public:
 
     virtual std::shared_ptr<Camera> camera() const = 0;
     virtual void camera(const std::shared_ptr<Camera> &new_camera) = 0;
+
+    virtual void update_frame_rate() = 0;
+    virtual float frame_interval() const = 0;
 };
 }
 }

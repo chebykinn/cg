@@ -10,6 +10,7 @@ std::vector<Action> Action::_actions = {
     {"movement.left",    Action::State::None, 1.0f},
     {"movement.right",   Action::State::None, 1.0f},
     {"movement.jump",    Action::State::None, 1.0f},
+    {"debug.noclip",     Action::State::None, 1.0f},
 };
 
 Action::Action(const std::string &new_name) : _name(new_name) {

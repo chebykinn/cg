@@ -17,6 +17,7 @@ void Input::init() {
         {"movement.left",    SDLK_a, 1.0f},
         {"movement.right",   SDLK_d, 1.0f},
         {"movement.jump",    SDLK_SPACE, 1.0f},
+        {"debug.noclip",     SDLK_n, 1.0f},
     };
 }
 

@@ -1,6 +1,6 @@
 #include <cassert>
 
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 #ifdef __APPLE__
 #include <OpenGL/gl.h>

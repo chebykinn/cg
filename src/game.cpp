@@ -3,7 +3,7 @@
 #include <iostream>
 #include <vector>
 
-#include <SDL2/SDL.h>
+#include <SDL.h>
 
 #include <game/config.h>
 #include <game/render/gl_window.h>

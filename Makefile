@@ -30,8 +30,8 @@ RELEASE_LIBS?=
 
 # Flags
 PROJECT_CFLAGS?=
-PROJECT_CXXFLAGS?=-std=c++14 -Wextra -D_DEBUG -fsanitize=address -DSPDLOG_TRACE_ON -DSPDLOG_DEBUG_ON -DGLM_FORCE_CXX11 -DGLM_FORCE_SWIZZLE
-PROJECT_LDFLAGS?=
+PROJECT_CXXFLAGS?=-std=c++14 -Wextra -D_DEBUG -fsanitize=address -DSPDLOG_TRACE_ON -DSPDLOG_DEBUG_ON -DGLM_FORCE_CXX11 -DGLM_FORCE_SWIZZLE $(shell pkg-config --cflags gl glu SDL2_image)
+PROJECT_LDFLAGS?=$(shell pkg-config --libs gl glu SDL2_image)
 
 TEST_CFLAGS?=
 TEST_LDFLAGS?=
